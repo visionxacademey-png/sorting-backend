@@ -5,12 +5,20 @@ const xlsx = require("xlsx");
 const ExcelJS = require("exceljs");
 
 const app = express();
-app.use(cors());
+
+app.use(cors({
+  origin: "*",
+}));
+
 app.use(express.json());
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({
+  dest: "uploads/",
+});
 
-// Time slots
+// =====================
+// TIME SLOTS
+// =====================
 const timeSlots = [
   "9:00-10:30",
   "10:30-12:00",
@@ -20,7 +28,9 @@ const timeSlots = [
   "4:30-6:00",
 ];
 
-// Create class
+// =====================
+// CREATE CLASS
+// =====================
 const createClass = (name, capacity) => ({
   name,
   capacity,
@@ -37,268 +47,672 @@ const createClass = (name, capacity) => ({
 // =====================
 // MAIN API
 // =====================
-app.post("/upload", upload.single("file"), async (req, res) => {
-  try {
-    // =====================
-    // READ EXCEL
-    // =====================
-    const inputWorkbook = xlsx.readFile(req.file.path);
-    const sheet = inputWorkbook.Sheets[inputWorkbook.SheetNames[0]];
+app.post(
+  "/upload",
+  upload.single("file"),
+  async (req, res) => {
 
-    const students = xlsx.utils.sheet_to_json(sheet).map((s) => ({
-      name: s["Student Name"] || s["Name"],
-      college: s["College"],
-      internship: s["Internship"],
-    }));
+    try {
 
-    // =====================
-    // CLASS INPUT FROM FRONTEND
-    // =====================
-    const classInput = JSON.parse(req.body.classes || "[]");
+      // =====================
+      // READ EXCEL
+      // =====================
+      const workbook =
+        xlsx.readFile(req.file.path);
 
-    let classes = classInput.map((c) =>
-      createClass(c.name, Number(c.capacity))
-    );
+      const sheet =
+        workbook.Sheets[
+          workbook.SheetNames[0]
+        ];
 
-    if (classes.length === 0) {
-      return res.status(400).json({ error: "No classes provided" });
-    }
+      // =====================
+      // PARSE STUDENTS
+      // =====================
+      const students =
+        xlsx.utils
+          .sheet_to_json(sheet)
+          .map((row) => ({
 
-    // =====================
-    // GROUPING
-    // =====================
-    const groups = {};
+            // NAME
+            name:
+              row["Name"] ||
+              row["Student Name"] ||
+              "",
 
-    students.forEach((s) => {
-      const key = `${s.college}__${s.internship}`;
+            // PHONE
+            phone: String(
+              row["Phone"] ??
+              row["Phone Number"] ??
+              ""
+            ).trim(),
 
-      if (!groups[key]) {
-        groups[key] = {
-          college: s.college,
-          internship: s.internship,
-          students: [],
-        };
-      }
+            // COLLEGE
+            college:
+              row["College"] ||
+              row["College Name"] ||
+              "",
 
-      groups[key].students.push(s);
-    });
+            // INTERNSHIP
+            internship:
+              row["Internship"] ||
+              row["Internship "] ||
+              row["Internship Name"] ||
+              "",
 
-    const groupList = Object.values(groups);
+          }));
 
-    // =====================
-    // INTERNSHIP PRIORITY
-    // =====================
-    const internshipMap = {};
+      console.log(students[0]);
 
-    groupList.forEach((g) => {
-      if (!internshipMap[g.internship]) {
-        internshipMap[g.internship] = [];
-      }
-      internshipMap[g.internship].push(g);
-    });
+      // =====================
+      // CLASS INPUT
+      // =====================
+      const classInput =
+        JSON.parse(
+          req.body.classes || "[]"
+        );
 
-    const internships = Object.keys(internshipMap).sort((a, b) => {
-      const totalA = internshipMap[a].reduce((sum, g) => sum + g.students.length, 0);
-      const totalB = internshipMap[b].reduce((sum, g) => sum + g.students.length, 0);
-      return totalB - totalA;
-    });
+      let classes =
+        classInput.map((c) =>
+          createClass(
+            c.name,
+            Number(c.capacity)
+          )
+        );
 
-    let tempClassCount = 1;
-    const finalAssignments = [];
+      // =====================
+      // GROUPING
+      // =====================
+      const groups = {};
 
-    // =====================
-    // ALLOCATION (COMBINED LOGIC)
-    // =====================
-    internships.forEach((internship) => {
-      const sortedGroups = internshipMap[internship].sort(
-        (a, b) => b.students.length - a.students.length
+      students.forEach((s) => {
+
+        const key =
+          `${s.college}__${s.internship}`;
+
+        if (!groups[key]) {
+
+          groups[key] = {
+
+            college:
+              s.college,
+
+            internship:
+              s.internship,
+
+            students: [],
+
+          };
+
+        }
+
+        groups[key]
+          .students
+          .push(s);
+
+      });
+
+      const groupList =
+        Object.values(groups);
+
+      // =====================
+      // INTERNSHIP PRIORITY
+      // =====================
+      const internshipMap = {};
+
+      groupList.forEach((g) => {
+
+        if (
+          !internshipMap[
+            g.internship
+          ]
+        ) {
+
+          internshipMap[
+            g.internship
+          ] = [];
+
+        }
+
+        internshipMap[
+          g.internship
+        ].push(g);
+
+      });
+
+      const internships =
+        Object.keys(
+          internshipMap
+        ).sort((a, b) => {
+
+          const totalA =
+            internshipMap[a]
+              .reduce(
+                (sum, g) =>
+                  sum +
+                  g.students.length,
+                0
+              );
+
+          const totalB =
+            internshipMap[b]
+              .reduce(
+                (sum, g) =>
+                  sum +
+                  g.students.length,
+                0
+              );
+
+          return totalB - totalA;
+
+        });
+
+      // =====================
+      // ALLOCATION
+      // =====================
+      let tempClassCount = 1;
+
+      const finalAssignments = [];
+
+      internships.forEach(
+        (internship) => {
+
+          const sortedGroups =
+            internshipMap[
+              internship
+            ].sort(
+              (a, b) =>
+                b.students.length -
+                a.students.length
+            );
+
+          sortedGroups.forEach(
+            (group) => {
+
+              let bestClass =
+                null;
+
+              let bestSlot =
+                null;
+
+              let minWaste =
+                Infinity;
+
+              // =====================
+              // FIND BEST SLOT
+              // =====================
+              for (
+                let cls of classes
+              ) {
+
+                for (
+                  let slot of cls.slots
+                ) {
+
+                  // EMPTY SLOT
+                  if (
+                    !slot.assigned
+                      .internship
+                  ) {
+
+                    if (
+                      cls.capacity >=
+                      group.students
+                        .length
+                    ) {
+
+                      const waste =
+                        cls.capacity -
+                        group.students
+                          .length;
+
+                      if (
+                        waste <
+                        minWaste
+                      ) {
+
+                        minWaste =
+                          waste;
+
+                        bestClass =
+                          cls;
+
+                        bestSlot =
+                          slot;
+
+                      }
+
+                    }
+
+                  }
+
+                  // SAME INTERNSHIP
+                  else if (
+                    slot.assigned
+                      .internship ===
+                    internship
+                  ) {
+
+                    const newTotal =
+                      slot.assigned
+                        .used +
+                      group.students
+                        .length;
+
+                    if (
+                      newTotal <=
+                      cls.capacity
+                    ) {
+
+                      const waste =
+                        cls.capacity -
+                        newTotal;
+
+                      if (
+                        waste <
+                        minWaste
+                      ) {
+
+                        minWaste =
+                          waste;
+
+                        bestClass =
+                          cls;
+
+                        bestSlot =
+                          slot;
+
+                      }
+
+                    }
+
+                  }
+
+                }
+
+              }
+
+              // =====================
+              // ASSIGN
+              // =====================
+              if (
+                bestClass &&
+                bestSlot
+              ) {
+
+                if (
+                  !bestSlot.assigned
+                    .internship
+                ) {
+
+                  bestSlot.assigned
+                    .internship =
+                    internship;
+
+                }
+
+                bestSlot.assigned
+                  .groups.push({
+
+                    college:
+                      group.college,
+
+                    count:
+                      group.students
+                        .length,
+
+                    students:
+                      group.students,
+
+                  });
+
+                bestSlot.assigned
+                  .used +=
+                  group.students
+                    .length;
+
+                group.students
+                  .forEach((s) => {
+
+                    finalAssignments
+                      .push({
+
+                        name:
+                          s.name,
+
+                        phone:
+                          s.phone,
+
+                        college:
+                          s.college,
+
+                        internship:
+                          s.internship,
+
+                        class:
+                          bestClass.name,
+
+                        time:
+                          bestSlot.time,
+
+                      });
+
+                  });
+
+              }
+
+              // =====================
+              // TEMP CLASS
+              // =====================
+              else {
+
+                const tempClassName =
+                  `TEMP_${tempClassCount++}`;
+
+                const newClass =
+                  createClass(
+                    tempClassName,
+                    group.students
+                      .length
+                  );
+
+                newClass
+                  .slots[0]
+                  .assigned
+                  .internship =
+                  internship;
+
+                newClass
+                  .slots[0]
+                  .assigned
+                  .groups
+                  .push({
+
+                    college:
+                      group.college,
+
+                    count:
+                      group.students
+                        .length,
+
+                    students:
+                      group.students,
+
+                  });
+
+                newClass
+                  .slots[0]
+                  .assigned
+                  .used =
+                  group.students
+                    .length;
+
+                group.students
+                  .forEach((s) => {
+
+                    finalAssignments
+                      .push({
+
+                        name:
+                          s.name,
+
+                        phone:
+                          s.phone,
+
+                        college:
+                          s.college,
+
+                        internship:
+                          s.internship,
+
+                        class:
+                          tempClassName,
+
+                        time:
+                          newClass
+                            .slots[0]
+                            .time,
+
+                      });
+
+                  });
+
+                classes.push(
+                  newClass
+                );
+
+              }
+
+            }
+          );
+
+        }
       );
 
-      sortedGroups.forEach((group) => {
-        let bestClass = null;
-        let bestSlot = null;
-        let minWaste = Infinity;
+      // =====================
+      // EXPORT EXCEL
+      // =====================
+      const outputWorkbook =
+        new ExcelJS.Workbook();
 
-        for (let cls of classes) {
-          for (let slot of cls.slots) {
+      // =====================
+      // STUDENT ALLOCATION SHEET
+      // =====================
+      const sheet1 =
+        outputWorkbook.addWorksheet(
+          "Student Allocation"
+        );
 
-            // CASE 1: Empty slot
-            if (!slot.assigned.internship) {
-              if (cls.capacity >= group.students.length) {
-                const waste = cls.capacity - group.students.length;
+      sheet1.columns = [
 
-                if (waste < minWaste) {
-                  minWaste = waste;
-                  bestClass = cls;
-                  bestSlot = slot;
-                }
-              }
+        {
+          header:
+            "Student Name",
+          key: "name",
+          width: 25,
+        },
+
+        {
+          header:
+            "Phone Number",
+          key: "phone",
+          width: 20,
+        },
+
+        {
+          header:
+            "College",
+          key: "college",
+          width: 30,
+        },
+
+        {
+          header:
+            "Internship",
+          key: "internship",
+          width: 25,
+        },
+
+        {
+          header:
+            "Class",
+          key: "class",
+          width: 15,
+        },
+
+        {
+          header:
+            "Time Slot",
+          key: "time",
+          width: 20,
+        },
+
+      ];
+
+      // =====================
+      // ADD STUDENT ROWS
+      // =====================
+      finalAssignments.forEach(
+        (s) => {
+
+          sheet1.addRow({
+
+            name:
+              s.name,
+
+            phone:
+              s.phone,
+
+            college:
+              s.college,
+
+            internship:
+              s.internship,
+
+            class:
+              s.class,
+
+            time:
+              s.time,
+
+          });
+
+        }
+      );
+
+      // =====================
+      // CLASS SCHEDULE SHEET
+      // =====================
+      const sheet2 =
+        outputWorkbook.addWorksheet(
+          "Class Schedule"
+        );
+
+      sheet2.columns = [
+
+        {
+          header:
+            "Class",
+          key: "class",
+          width: 15,
+        },
+
+        {
+          header:
+            "Time Slot",
+          key: "time",
+          width: 20,
+        },
+
+        {
+          header:
+            "Internship",
+          key: "internship",
+          width: 25,
+        },
+
+        {
+          header:
+            "Colleges",
+          key: "college",
+          width: 40,
+        },
+
+        {
+          header:
+            "Student Count",
+          key: "count",
+          width: 20,
+        },
+
+      ];
+
+      classes.forEach((cls) => {
+
+        cls.slots.forEach(
+          (slot) => {
+
+            if (
+              slot.assigned
+                .internship
+            ) {
+
+              sheet2.addRow({
+
+                class:
+                  cls.name,
+
+                time:
+                  slot.time,
+
+                internship:
+                  slot.assigned
+                    .internship,
+
+                college:
+                  slot.assigned
+                    .groups
+                    .map(
+                      (g) =>
+                        g.college
+                    )
+                    .join(", "),
+
+                count:
+                  slot.assigned
+                    .used,
+
+              });
+
             }
 
-            // CASE 2: Same internship → combine
-            else if (slot.assigned.internship === internship) {
-              const newTotal = slot.assigned.used + group.students.length;
-
-              if (newTotal <= cls.capacity) {
-                const waste = cls.capacity - newTotal;
-
-                if (waste < minWaste) {
-                  minWaste = waste;
-                  bestClass = cls;
-                  bestSlot = slot;
-                }
-              }
-            }
           }
-        }
+        );
 
-        // ASSIGN
-        if (bestClass && bestSlot) {
-
-          if (!bestSlot.assigned.internship) {
-            bestSlot.assigned.internship = internship;
-          }
-
-          bestSlot.assigned.groups.push({
-            college: group.college,
-            count: group.students.length,
-            students: group.students,
-          });
-
-          bestSlot.assigned.used += group.students.length;
-
-          group.students.forEach((s) => {
-            finalAssignments.push({
-              name: s.name,
-              college: s.college,
-              internship: s.internship,
-              class: bestClass.name,
-              time: bestSlot.time,
-            });
-          });
-        }
-
-        // TEMP CLASS
-        else {
-          const tempClassName = `TEMP_${tempClassCount++}`;
-          const newClass = createClass(tempClassName, group.students.length);
-
-          newClass.slots[0].assigned.internship = internship;
-          newClass.slots[0].assigned.groups.push({
-            college: group.college,
-            count: group.students.length,
-            students: group.students,
-          });
-
-          newClass.slots[0].assigned.used = group.students.length;
-
-          group.students.forEach((s) => {
-            finalAssignments.push({
-              name: s.name,
-              college: s.college,
-              internship: s.internship,
-              class: tempClassName,
-              time: newClass.slots[0].time,
-            });
-          });
-
-          classes.push(newClass);
-        }
-      });
-    });
-
-    // =====================
-    // EXCEL EXPORT
-    // =====================
-    const workbook = new ExcelJS.Workbook();
-
-    // Sheet 1
-    const sheet1 = workbook.addWorksheet("Student Allocation");
-    sheet1.columns = [
-      { header: "Student Name", key: "name", width: 25 },
-      { header: "College", key: "college", width: 25 },
-      { header: "Internship", key: "internship", width: 20 },
-      { header: "Class", key: "class", width: 15 },
-      { header: "Time Slot", key: "time", width: 20 },
-    ];
-
-    finalAssignments.forEach((s) => {
-      sheet1.addRow(s);
-    });
-
-    // Sheet 2
-    const sheet2 = workbook.addWorksheet("Class Schedule");
-    sheet2.columns = [
-      { header: "Class", key: "class", width: 15 },
-      { header: "Time", key: "time", width: 20 },
-      { header: "Internship", key: "internship", width: 20 },
-      { header: "Colleges", key: "college", width: 30 },
-      { header: "Total Students", key: "count", width: 20 },
-    ];
-
-    classes.forEach((cls) => {
-      cls.slots.forEach((slot) => {
-        if (slot.assigned.internship) {
-          sheet2.addRow({
-            class: cls.name,
-            time: slot.time,
-            internship: slot.assigned.internship,
-            college: slot.assigned.groups.map(g => g.college).join(", "),
-            count: slot.assigned.used,
-          });
-        }
-      });
-    });
-
-    // Sheet 3
-    const sheet3 = workbook.addWorksheet("Timetable");
-
-    sheet3.addRow([
-      "Class",
-      "9:00",
-      "10:30",
-      "12:00",
-      "1:30",
-      "3:00",
-      "4:30",
-    ]);
-
-    classes.forEach((cls) => {
-      const row = [cls.name];
-
-      cls.slots.forEach((slot) => {
-        if (slot.assigned.internship) {
-          row.push(
-            `${slot.assigned.internship}\n${slot.assigned.groups.map(g => g.college).join(", ")} (${slot.assigned.used})`
-          );
-        } else {
-          row.push("Empty");
-        }
       });
 
-      sheet3.addRow(row);
-    });
+      // =====================
+      // SEND FILE
+      // =====================
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
 
-    // SEND FILE
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
-    res.setHeader(
-      "Content-Disposition",
-      "attachment; filename=allocation.xlsx"
-    );
+      res.setHeader(
+        "Content-Disposition",
+        "attachment; filename=allocation.xlsx"
+      );
 
-    await workbook.xlsx.write(res);
-    res.end();
+      await outputWorkbook
+        .xlsx
+        .write(res);
 
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error processing file" });
+      res.end();
+
+    } catch (err) {
+
+      console.error(err);
+
+      res.status(500).json({
+        error:
+          "Error processing file",
+      });
+
+    }
+
   }
-});
+);
 
 // =====================
-app.listen(5000, () => {
-  console.log("Server running on port 5000 🚀");
+// SERVER
+// =====================
+const PORT =
+  process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+
+  console.log(
+    `Server running on port ${PORT} 🚀`
+  );
+
 });
